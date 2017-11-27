@@ -18,8 +18,9 @@ class Item:
 	"""
 ['ATTRIBUTE_NODE', 'CDATA_SECTION_NODE', 'COMMENT_NODE', 'DOCUMENT_FRAGMENT_NODE', 'DOCUMENT_NODE', 'DOCUMENT_TYPE_NODE', 'ELEMENT_NODE', 'ENTITY_NODE', 'ENTITY_REFERENCE_NODE', 'NOTATION_NODE', 'PROCESSING_INSTRUCTION_NODE', 'TEXT_NODE', '__doc__', '__init__', '__module__', '__nonzero__', '__repr__', '_attrs', '_attrsNS', '_call_user_data_handler', '_child_node_types', '_get_attributes', '_get_childNodes', '_get_firstChild', '_get_lastChild', '_get_localName', '_get_nodeName', '_magic_id_nodes', 'appendChild', 'attributes', 'childNodes', 'cloneNode', 'firstChild', 'getAttribute', 'getAttributeNS', 'getAttributeNode', 'getAttributeNodeNS', 'getElementsByTagName', 'getElementsByTagNameNS', 'getInterface', 'getUserData', 'hasAttribute', 'hasAttributeNS', 'hasAttributes', 'hasChildNodes', 'insertBefore', 'isSameNode', 'isSupported', 'lastChild', 'localName', 'namespaceURI', 'nextSibling', 'nodeName', 'nodeType', 'nodeValue', 'normalize', 'ownerDocument', 'parentNode', 'prefix', 'previousSibling', 'removeAttribute', 'removeAttributeNS', 'removeAttributeNode', 'removeAttributeNodeNS', 'removeChild', 'replaceChild', 'schemaType', 'setAttribute', 'setAttributeNS', 'setAttributeNode', 'setAttributeNodeNS', 'setIdAttribute', 'setIdAttributeNS', 'setIdAttributeNode', 'setUserData', 'nodeName', 'toprettyxml', 'toxml', 'unlink', 'writexml']
 	"""
-	def __init__(self, xmlnode, parent=None, document=None, level=0):
+	def __init__(self, xmlnode, parent=None, document=None, level=0, root=None):
 		self._document = xmlnode if xmlnode.nodeName == '#document' else document
+		self._root = root if root is not None else self
 		self._node = xmlnode
 		self._parent = parent
 		self._level = level
@@ -27,14 +28,16 @@ class Item:
 		self._textvalue = None
 
 		if (len(self._node.childNodes) == 1) and (self._node.childNodes[0].nodeName == '#text'):
-			self._textvalue = Item(self._node.childNodes[0], document=self._document, parent=self, level=level+1)
+			self._textvalue = Item(self._node.childNodes[0], document=self._document, parent=self, level=level+1, root=self.getRootNode())
 			return
 		for n in self._node.childNodes[:]: 
+			if level == 0:
+				self._root =  self
 			# Skip pretty tabs
 			if n.nodeName == '#text' and n.toxml().strip() == '':
 				self._node.removeChild(n)
 				continue
-			self.appendChild(Item(n, parent=self, document=self._document, level=level+1))
+			self.appendChild(Item(n, parent=self, document=self._document, level=level+1, root=self.getRootNode()))
 
 	def appendChild(self, item):
 		if item.__class__.__name__ == 'Item':
@@ -45,7 +48,7 @@ class Item:
 			if item not in self._children:
 				self._children.append(item)
 		else:
-			item = Item(item, parent=self, document=self._document, level=self._level+1)
+			item = Item(item, parent=self, document=self._document, level=self._level+1, root=self.getRootNode())
 			self._children.append(item)
 
 	def setAttribute(self, name, value):
@@ -77,7 +80,7 @@ class Item:
 		self._node.replaceChild(replace._node, which._node)
 
 	def cloneNode(self):
-		return Item(self._node.cloneNode(True), parent=None, document=self._document, level=self._level)
+		return Item(self._node.cloneNode(True), parent=None, document=self._document, level=self._level, root=self.getRootNode())
 
 	def createElement(self, *args, **kwargs):
 		try:
@@ -131,6 +134,22 @@ class Item:
 			else:
 				raise Exception("Unknown material/script tag: {0}".format(opt.nodeName()))
 		return name, gzMaterial
+
+	def getRootNode(self):
+		if self._root is None:
+			return self
+		return self._root
+
+	_materialNodes = {}
+	def _getMaterialNode(self, name):
+		exists = name in self.__class__._materialNodes
+		if not exists:
+			root = self.getRootNode()
+			item = Item(self.createElement('material'), parent=root, document=self._document, level=root._level+1, root=self.getRootNode())
+			item.setAttribute('name', name)
+			root.appendChild( item )
+			self.__class__._materialNodes[name] = item
+		return self.__class__._materialNodes[name], exists
 		
 
 	def convert(self):
@@ -150,7 +169,7 @@ class Item:
 						<...>
 					</robot>
 				"""
-				node = Item(self.createElement('robot'), parent=self, document=self._document, level=self._level+1)
+				node = Item(self.createElement('robot'), parent=self, document=self._document, level=self._level+1) # Root is None because it's a new root node
 				copy = c.cloneNode()
 				for ch in self._children:
 					self.removeChild(ch)
@@ -162,7 +181,7 @@ class Item:
 
 				for ch in copy._node.childNodes[0].childNodes[:]:
 					node._node.appendChild(ch)
-					item = Item(ch, parent=self, document=self._document, level=self._level+1)
+					item = Item(ch, parent=self, document=self._document, level=self._level+1, root=node.getRootNode())
 					node.appendChild(item)
 				#self.replaceChild(node, copy)
 				self.appendChild(node)
@@ -190,16 +209,19 @@ class Item:
 					  <color rgba="0.3 0.3 0.3 1.0"/>
 					</material>	
 				"""
-				if len(c._children) == 1 and c._children[0].nodeName() == 'script': 
+				if len(c._children) == 1 and c._children[0].nodeName() == 'script' and c._level>1: 
 					name, gzMaterial = self._getGazeboMaterial(c._children[0])
 					c.removeChild(c._children[0])
 					if name:
 						c.setAttribute("name", name)
+
 					materials = gzMaterial.getColor(name)
+					material, exists = self._getMaterialNode(name)
 					if materials:
-						color = Item(self.createElement('color'), parent=c, document=self._document, level=c._level+1)
-						color.setAttribute("rgba", " ".join(materials[0].args()))
-						c.appendChild(color)
+						if not exists:
+							color = Item(self.createElement('color'), parent=c, document=self._document, level=c._level+1, root=self.getRootNode())
+							color.setAttribute("rgba", " ".join(materials[0].args()))
+							material.appendChild(color)
 					else:
 						raise Exception("Material not found ({1}) at {2}".format('material[name='+name+'].technique.pass.ambient', gzMaterial.getFilename()))
 				else:
@@ -211,7 +233,7 @@ class Item:
 					<origin rpy="0 0 -1.0471975512" xyz="0 0 0"/>
 				"""
 				# Pose replaced with Origin
-				origin = Item(self.createElement("origin"), parent=self, document=self._document, level=self._level+1)
+				origin = Item(self.createElement("origin"), parent=self, document=self._document, level=self._level+1, root=self.getRootNode())
 				text = c.text().strip().split(' ')
 				origin.setAttribute("xyz", " ".join(text[:3]))
 				origin.setAttribute("rcy", " ".join(text[3:]))
@@ -284,6 +306,7 @@ class Item:
 
 	def toxml(self):
 		return self._node.toprettyxml(indent="  ")
+
 	def dumptree(self):
 		sys.stderr.write("{0}{1}: {2}({3})\n".format("  "*self._level, self._level, self.nodeName(), len(self._children)))
 		for c in self._children:
@@ -294,6 +317,8 @@ def main():
 	if len(sys.argv) == 1 or len(sys.argv) > 3 or 'help' in sys.argv or '--help' in sys.argv or '-h' in sys.argv:
 		sys.stdout.write("""usage: {0} <input.sdf> [<output.urdf>]\n\n  By default content is printed to stdout.\n\n""".format(sys.argv[0]))
 		exit(1)
+	if os.path.realpath(sys.argv[1]) == os.path.realpath(sys.argv[2]):
+		raise Exception("Input and output filenames is the same file")
 	xml = parse(None, sys.argv[1])
 	output = sys.stdout
 	if len(sys.argv) == 3:
