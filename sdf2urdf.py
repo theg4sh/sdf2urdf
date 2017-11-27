@@ -150,7 +150,6 @@ class Item:
 			root.appendChild( item )
 			self.__class__._materialNodes[name] = item
 		return self.__class__._materialNodes[name], exists
-		
 
 	def convert(self):
 		for c in self._children[:]:
@@ -251,6 +250,9 @@ class Item:
 					('link',   'link',  'value'))).get(c.nodeName())
 				if len(c._node.childNodes):
 					c.setAttribute(attr, c.text().strip())
+					cnodes = c._node.childNodes[:]
+					for mc in cnodes:
+						c._node.removeChild(mc)
 				for mc in c._children:
 					c.removeChild(mc)
 
