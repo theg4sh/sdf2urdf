@@ -3,140 +3,14 @@ import sys
 # gazebo's material syntax parsing
 import pyparsing as gz
 
-class GazeboItem(object):
-	def __init__(self, typeName):
-		self._type = typeName
-		self._name = None
-		self._level = -1
-		self._parent = None
-		self._arguments = []
-		self._children = []
-		self.__has_inheritance = False
-		self._inherits_link = []
-		self._inheritance = []
-
-	def level(self):
-		return self._level
-
-	def type(self):
-		return self._type
-
-	def parent(self):
-		return self._parent
-
-	def arg(self, idx):
-		if idx < len(self._arguments):
-			return self._arguments[idx]
-
-	def args(self):
-		return self._arguments
-
-	def name(self):
-		return self._name
-
-	def _setName(self, name):
-		self._name = name
-
-	def __fixChildLevels(self, child):
-		if child._parent != self or child._level == self._level+1:
-			return
-		child._level = self._level+1
-		for c2 in child._children:
-			child.__fixChildLevels(c2)
-
-	def _addChild(self, item):
-		self._children.append(item)
-		self.__fixChildLevels(item)
-		
-	def addChild(self, item):
-		#if item not in self._children:
-		item._parent = self
-		self._addChild(item)
-		return item
-
-	def addArgument(self, arg):
-		self._arguments.append(arg)
-
-	def addInheritance(self, classname):
-		self.__has_inheritance = True
-		self._inheritance.append(classname)
-
-	def findAll(self, typeName):
-		opts = {}
-		if '[' in typeName:
-			typeName, vargs = typeName[:typeName.index('[')], typeName[typeName.index('[')+1:typeName.rindex(']')]
-			buf = {}
-			for o in vargs.split(','): # multiple opts
-				varg = o.split('=',1)
-				if len(varg)==1:
-					opts[varg[0]] = True
-				elif len(varg)==2:
-					opts[varg[0]] = varg[1]
-		def checkOpts(child):
-			for k, v in opts.items():
-				if not hasattr(child, k):
-					return False
-				attr = getattr(child, k)
-				if v is True:
-					if attr is None or (callable(attr) and attr() is None):
-						return False
-				else:
-					if attr is None or (not callable(attr) and attr != v) or (callable(attr) and attr() != v):
-						return False
-			return True
-		out = []
-		for child in self._children[:]:
-			if child.type() == typeName and checkOpts(child):
-				out.append(child)
-		return out
-
-	def __str__(self):
-		srep = ""
-		if self._level>=0:
-			prefix = "  "*(self._level)
-			srep = "{0}{1}".format(prefix, self._type)
-			if self._arguments:
-				srep += " ".join(['']+self._arguments)
-			if self._inheritance:
-				if type(self._inheritance[0]) == str:
-					srep += self._inheritance[0]
-				else:
-					srep += self._inheritance[0].name()
-		if self._children:
-			if self._level >= 0:
-				srep += '\n%s{\n'%prefix
-			for child in self._children:
-				srep += child.__str__()
-			if self._level >= 0:
-				srep += '%s}'%prefix
-			else:
-				srep += '\n'
-		else:
-			if self._level == 0 and self.type() != 'import':
-				srep += ' { }'
-		return srep+'\n'
-
-	def dumptree(self, filename=None, fwrite=None):
-		if fwrite is None:
-			fwrite = sys.stdout
-			if filename is not None:
-				fwrite = open(fp, "w")
-			
-
-		lvl = self._level+1
-		namedef = '@root' if lvl == 0 else ("<"+self._type+"[{0}]>".format(len(self._arguments)))
-		name = self._name if self._name is not None else namedef
-		
-		fwrite.write("{2}{0}: {1} +({3})\n".format(lvl, name, "  "*(lvl), len(self._children)))
-		for child in self._children:
-			child.dumptree(fwrite=fwrite)
+from GazeboMaterialItem import *
 
 class GazeboMaterialFile:
 	def __init__(self, filename):
 		self._filename = filename
 		self._imports = [] # TODO
 		self._parsed = False
-		self._root = GazeboItem(None)
+		self._root = GazeboMaterialItem(None)
 
 	def getFilename(self):
 		return self._filename
@@ -197,7 +71,7 @@ class GazeboMaterialFile:
 		def makeBlock(token, level=0):
 			tkeys = token.keys()
 			if 'itemtype' in tkeys:
-				item = GazeboItem(token['itemtype'])
+				item = GazeboMaterialItem(token['itemtype'])
 			else:
 				raise Exception("Cannot found itemtype in {0}".format(token))
 
@@ -336,93 +210,3 @@ class GazeboMaterialFile:
 		self.parse()
 		return self.find('material[name={0}].technique.pass.ambient'.format(name))
 			
-
-# Example content
-_content = """
-import * from "grid.material"
-
-vertex_program Gazebo/DepthMapVS glsl
-{
-  source depth_map.vert
-
-  default_params
-  {
-    param_named_auto texelOffsets texel_offsets
-  }
-}
-fragment_program Gazebo/DepthMapFS glsl
-{
-  source depth_map.frag
-
-  default_params
-  {
-    param_named_auto pNear near_clip_distance
-    param_named_auto pFar far_clip_distance
-  }
-}
-
-material Gazebo/DepthMap
-{
-  technique
-  {
-    pass
-    {
-      vertex_program_ref Gazebo/DepthMapVS { }
-      fragment_program_ref Gazebo/DepthMapFS { }
-    }
-  }
-}
-
-vertex_program Gazebo/XYZPointsVS glsl
-{
-  source depth_points_map.vert
-}
-
-fragment_program Gazebo/XYZPointsFS glsl
-{
-  source depth_points_map.frag
-
-  default_params
-  {
-    param_named_auto width viewport_width
-    param_named_auto height viewport_height
-  }
-}
-
-material Gazebo/XYZPoints
-{
-  technique
-  {
-    pass pcd_tex
-    {
-      separate_scene_blend one zero one zero
-
-      vertex_program_ref Gazebo/XYZPointsVS { }
-      fragment_program_ref Gazebo/XYZPointsFS { }
-    }
-  }
-}
-
-material Gazebo/Grey
-{
-  technique
-  {
-    pass main
-    {
-      ambient .3 .3 .3  1.0
-      diffuse .7 .7 .7  1.0
-      specular 0.01 0.01 0.01 1.000000 1.500000
-    }
-  }
-}
-material Gazebo/Gray : Gazebo/Grey
-{
-}
-
-"""
-
-
-if __name__ == "__main__":
-	gzMaterial = GazeboMaterialFile("/usr/share/gazebo-8/media/materials/scripts/gazebo.material");
-	c1, c2 = gzMaterial.getColor('Gazebo/Grey')[0], gzMaterial.getColor('Gazebo/Gray')[0]
-	print(str(" ".join(c1.args())))

@@ -2,13 +2,15 @@
 
 import os
 import sys
+
 # GazeboMaterial
 sys.path.append(os.path.dirname(os.path.realpath(sys.argv[0])))
+from GazeboMaterial import *
+
 # xml operations
 from xacro import parse
 from xacro.xmlutils import *
 
-from GazeboMaterial import GazeboMaterialFile
 
 rospack = None
 
@@ -290,7 +292,7 @@ class Item:
 
 def main():
 	if len(sys.argv) == 1 or len(sys.argv) > 3 or 'help' in sys.argv or '--help' in sys.argv or '-h' in sys.argv:
-		sys.stdout.write("""usage: {0} <input.sdf> [<output.urdf>]""".format(sys.argv[0]))
+		sys.stdout.write("""usage: {0} <input.sdf> [<output.urdf>]\n\n  By default content is printed to stdout.\n\n""".format(sys.argv[0]))
 		exit(1)
 	xml = parse(None, sys.argv[1])
 	output = sys.stdout
