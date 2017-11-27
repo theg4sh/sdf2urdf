@@ -21,7 +21,7 @@ class GazeboMaterialFile:
 		multiline_comment  = gz.cStyleComment
 		comments = gz.MatchFirst([singleline_comment, multiline_comment])
 
-		real    = gz.Combine(gz.Optional(gz.oneOf("+ -")) + gz.Optional(gz.Word(gz.nums), default="0") +"." + gz.Word(gz.nums)).setName("real")
+		real    = gz.Combine(gz.Optional(gz.oneOf("+ -")) + gz.Optional(gz.Word(gz.nums)) +"." + gz.Word(gz.nums)).setName("real")
 		integer = gz.Combine(gz.Optional(gz.oneOf("+ -")) + gz.Word(gz.nums)).setName("integer")
 		nums    = real | integer
 
