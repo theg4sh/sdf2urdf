@@ -57,6 +57,9 @@ class Item:
 	def getAttribute(self, name):
 		return self._node.getAttribute(name)
 
+	def removeAttribute(self, name):
+		self._node.removeAttribute(name)
+
 	def text(self):
 		return self._node.childNodes[0].toxml()
 
@@ -152,48 +155,72 @@ class Item:
 		return self.__class__._materialNodes[name], exists
 
 	def convert(self):
-		for c in self._children[:]:
-			# Main node replacement
-			if c.isSDF():
-				"""
-					<sdf version="1.5">
-						<model name="typhoon_h480_roscam">
+		if self._level == 0:
+			for c in self._children[:]:
+				# Main node replacement
+				if c.isSDF():
+					"""
+						<sdf version="1.5">
+							<model name="typhoon_h480_roscam">
+								<...>
+								<...>
+							</model>
+						</sdf>
+					---
+						<robot name="typhoon_h480_roscam">
 							<...>
 							<...>
-						</model>
-					</sdf>
-				---
-					<robot name="typhoon_h480_roscam">
-						<...>
-						<...>
-					</robot>
-				"""
-				node = Item(self.createElement('robot'), parent=self, document=self._document, level=self._level+1) # Root is None because it's a new root node
-				copy = c.cloneNode()
-				for ch in self._children:
-					self.removeChild(ch)
-				for ch in self._node.childNodes:
-					self._node.removeChild(ch)
-				
-				for name, attr in copy._node.childNodes[0].attributes.items():
-					node._node.setAttribute(name, attr)
+						</robot>
+					"""
+					node = Item(self.createElement('robot'), parent=self, document=self._document, level=self._level+1) # Root is None because it's a new root node
+					copy = c.cloneNode()
+					for ch in self._children:
+						self.removeChild(ch)
+					for ch in self._node.childNodes:
+						self._node.removeChild(ch)
+					
+					for name, attr in copy._node.childNodes[0].attributes.items():
+						node._node.setAttribute(name, attr)
 
-				for ch in copy._node.childNodes[0].childNodes[:]:
-					node._node.appendChild(ch)
-					item = Item(ch, parent=self, document=self._document, level=self._level+1, root=node.getRootNode())
-					node.appendChild(item)
-				#self.replaceChild(node, copy)
-				self.appendChild(node)
-				
+					for ch in copy._node.childNodes[0].childNodes[:]:
+						node._node.appendChild(ch)
+						item = Item(ch, parent=self, document=self._document, level=self._level+1, root=node.getRootNode())
+						node.appendChild(item)
+					#self.replaceChild(node, copy)
+					self.appendChild(node)
+					break
+				else:
+					raise Exception("Unsupported file type: {0}".format(c.nodeName()))
+
+		_properties = {}
+		for c in self._children[:]:
+			if c.nodeName() not in _properties:
+				_properties[c.nodeName()] = c
+			elif type(_properties[c.nodeName()]) == list:
+				_properties[c.nodeName()].append(c)
+			else:
+				_properties[c.nodeName()] = [_properties[c.nodeName()], c]
+
+		for c in self._children[:]:
+
+			# Unused elements
+			if c.nodeName() in ['plugin', 'physics', 'gravity', 'velocity_decay', 'self_collide', 'surface', 'static', 'dissipation', 'stiffness', 'sensor', '#comment']:
+				self.removeChild(c)
+
 			# Inner tags into attributes, nothing else
-			elif c.nodeName() in ['inertia', 'cylinder', 'sphere', 'box', 'limit'] :
+			elif c.nodeName() in ['inertia', 'cylinder', 'sphere', 'box', 'limit', 'dynamics'] :
+				if c.nodeName() == 'limit':
+					c.convert()
 				for mc in c._children[:]:
 					c.setAttribute(mc.nodeName(), mc.text().strip())
 					c.removeChild(mc)
 
-			# Unused elements
-			elif c.nodeName() in ['plugin', 'physics', 'gravity', 'velocity_decay', 'self_collide', 'surface', 'static', '#comment']:
-				self.removeChild(c)
+			elif c.nodeName() in ['visual', 'collision']:
+				if c.nodeName() == 'collision' and c.nodeName() in _properties:
+					self.removeChild(c)
+				else:
+					for name,attr in c._node.attributes.items():
+						c.removeAttribute(name)
 
 			elif c.nodeName() == 'material':
 				"""
@@ -219,7 +246,8 @@ class Item:
 					if materials:
 						if not exists:
 							color = Item(self.createElement('color'), parent=c, document=self._document, level=c._level+1, root=self.getRootNode())
-							color.setAttribute("rgba", " ".join(materials[0].args()))
+							rgba = materials[0].args() + ['1.0', '1.0', '1.0', '1.0']
+							color.setAttribute("rgba", " ".join(rgba[:4])) # rgba should contains 4 element, some of gazebo's material could contains 3 elements
 							material.appendChild(color)
 					else:
 						raise Exception("Material not found ({1}) at {2}".format('material[name='+name+'].technique.pass.ambient', gzMaterial.getFilename()))
@@ -231,13 +259,15 @@ class Item:
 				---
 					<origin rpy="0 0 -1.0471975512" xyz="0 0 0"/>
 				"""
-				# Pose replaced with Origin
-				origin = Item(self.createElement("origin"), parent=self, document=self._document, level=self._level+1, root=self.getRootNode())
-				text = c.text().strip().split(' ')
-				origin.setAttribute("xyz", " ".join(text[:3]))
-				origin.setAttribute("rcy", " ".join(text[3:]))
-				#origin.appendChild(
-				self.replaceChild(origin, c)
+				if self.nodeName() == 'robot':
+					self.removeChild(c)
+				else:
+					# Pose replaced with Origin
+					origin = Item(self.createElement("origin"), parent=self, document=self._document, level=self._level+1, root=self.getRootNode())
+					text = c.text().strip().split(' ')
+					origin.setAttribute("xyz", " ".join(text[:3]))
+					origin.setAttribute("rpy", " ".join(text[3:]))
+					self.replaceChild(origin, c)
 
 			elif c.nodeName() in ['parent', 'child', 'mass']:
 				"""
@@ -284,18 +314,31 @@ class Item:
 					  <use_parent_model_frame>1</use_parent_model_frame>
 					</axis>
 				---
-					<axis xyx="0 -1 0"/>
+					<axis xyz="0 -1 0"/>
 					<limit lower="0" upper="0" effort="100" velocity="-1"/>
 				"""
-				c.convert() # Fix limit internals tag2attr
+				c.convert()
 				for mc in c._children[:]:
 					if mc.nodeName() == 'xyz':
 						c.setAttribute(mc.nodeName(), mc._node.childNodes[0].toxml().strip())
 					c.removeChild(mc)
 					if mc.nodeName() == 'limit':
-						self.appendChild(mc);
-				
-						
+						self.appendChild(mc)
+					if mc.nodeName() == 'dynamics':
+						if mc.getAttribute('damping') or mc.getAttribute('friction'):
+							self.appendChild(mc)
+						else:
+							c.removeChild(mc)
+				_props = self._node.childNodes[:]
+				for prop in _props:
+					if prop.nodeName == 'origin':
+						break
+				else:
+					origin = Item(self.createElement("origin"), parent=self, document=self._document, level=self._level+1, root=self.getRootNode())
+					for name,value in c._node.attributes.items():
+						origin.setAttribute(name, value)
+					self.appendChild(origin)
+					#self.removeChild(c)
 
 		for c in self._children:
 			# Fix broken tree
@@ -319,7 +362,7 @@ def main():
 	if len(sys.argv) == 1 or len(sys.argv) > 3 or 'help' in sys.argv or '--help' in sys.argv or '-h' in sys.argv:
 		sys.stdout.write("""usage: {0} <input.sdf> [<output.urdf>]\n\n  By default content is printed to stdout.\n\n""".format(sys.argv[0]))
 		exit(1)
-	if os.path.realpath(sys.argv[1]) == os.path.realpath(sys.argv[2]):
+	if len(sys.argv) == 3 and os.path.realpath(sys.argv[1]) == os.path.realpath(sys.argv[2]):
 		raise Exception("Input and output filenames is the same file")
 	xml = parse(None, sys.argv[1])
 	output = sys.stdout
