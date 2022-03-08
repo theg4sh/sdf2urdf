@@ -1,5 +1,5 @@
-from GazeboMaterialFile import *
-from GazeboMaterialItem import *
+from GazeboMaterial.GazeboMaterialFile import *
+from GazeboMaterial.GazeboMaterialItem import *
 
 
 # Example content
@@ -88,11 +88,54 @@ material Gazebo/Gray : Gazebo/Grey
 """
 
 
+def load_gazebo_setup():
+	from dotenv import load_dotenv
+	from pathlib import Path
+	from os.path import join as joinp, dirname, abspath
+
+	dotenv_path = Path('/usr/share/gazebo/setup.sh')
+	load_dotenv(dotenv_path)
+
+def gazebo_material_test():
+	gazebo_resource_path = os.getenv('GAZEBO_RESOURCE_PATH').split(':')
+
+	for gzpath in gazebo_resource_path:
+		gazebo_material_path = joinp(str(gazebo_resource_path), "media", "materials", "scripts", "gazebo.material")
+		if not os.path.exists(gazebo_material_path):
+			continue
+		gzMaterial = GazeboMaterialFile(gazebo_material_path);
+		gzMaterial._parse(_getTestContent())
+		GAZEBO_GREY='Gazebo/Grey'
+		GAZEBO_GRAY='Gazebo/Gray'
+
+		print("Test: ",
+			gzMaterial.find('material[name={0}].technique.pass.ambient'.format(GAZEBO_GREY)),
+		)
+		grey = gzMaterial.getColor(GAZEBO_GREY)
+		gray = gzMaterial.getColor(GAZEBO_GRAY)
+		assert grey
+		assert gray
+		c1, c2 = gray[0], grey[0]
+		print(str(" ".join(c1.args())))
+
+def gazebo_tree_test():
+	pass
+
+def parse_args():
+	import argparse
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--test-inheritance', action='store_true')
+	parser.add_argument('--test-dumptree', action='store_true')
+	return parser.parse_args()
+
 if __name__ == "__main__":
-	gzMaterial = GazeboMaterialFile("/usr/share/gazebo-8/media/materials/scripts/gazebo.material");
-	gzMaterial._parse(_getTestContent())
-	c1, c2 = gzMaterial.getColor('Gazebo/Grey')[0], gzMaterial.getColor('Gazebo/Gray')[0]
-	print(str(" ".join(c1.args())))
+	args = parse_args()
+	if args.test_inheritance:
+		gazebo_material_test()
+	elif args.test_dumptree:
+		pass
 
+__all__ = ['GazeboMaterialItem', 'GazeboMaterialFile', 'load_gazebo_setup']
 
-__all__ = ['GazeboMaterialItem', 'GazeboMaterialFile']
+# vim: ts=4 sw=4 noet
