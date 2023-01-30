@@ -1,10 +1,10 @@
-#!/usr/bin/python2
+#!/usr/bin/env python3
 
 import os
 import sys
 
 # GazeboMaterial
-sys.path.append(os.path.dirname(os.path.realpath(sys.argv[0])))
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from GazeboMaterial import *
 
 # xml operations
@@ -39,6 +39,9 @@ class Item:
 				continue
 			self.appendChild(Item(n, parent=self, document=self._document, level=level+1, root=self.getRootNode()))
 
+	def __repr__(self):
+		return f'Item<level={self._level},name={self.nodeName}>';
+
 	def appendChild(self, item):
 		if item.__class__.__name__ == 'Item':
 			if item._node.parentNode is not None and item._node.parentNode != self._node:
@@ -63,6 +66,7 @@ class Item:
 	def text(self):
 		return self._node.childNodes[0].toxml()
 
+	@property
 	def nodeName(self):
 		return self._node.nodeName
 
@@ -96,21 +100,31 @@ class Item:
 		return self
 
 	def isSDF(self):
-		return self.nodeName() == 'sdf' and self._level == 1
+		return self.nodeName == 'sdf' and self._level == 1
 
 	def uriToPath(self, uri):
-		parts = uri.encode("utf-8").split('/')
+		def try_encode(uri, wrap):
+			try:
+				return wrap(uri.encode("utf-8"))
+			except:
+				return wrap(uri)
+
+		parts = try_encode(uri, lambda x: x.split('/'))
 		uritype, _, parts = parts[0], None, parts[2:]
-		
+
 		searchpath = []
-		typemap = { "model:": ["GAZEBO_MODEL_PATH"], 
-			    "file:":  ["GAZEBO_RESOURCE_PATH"] }.get(uritype)
+		typemap = {
+			"model:": ["GAZEBO_MODEL_PATH"],
+			"file:":  ["GAZEBO_RESOURCE_PATH"],
+		}.get(uritype)
+
 		if typemap is None:
 			return None
 
-		for env in typemap:
-			if os.environ.get(env) is not None:
-				searchpath += os.environ.get(env).encode("utf-8").strip(":").split(':')
+		for envvar in typemap:
+			value = os.getenv(envvar)
+			if value is not None:
+				searchpath += try_encode(value, lambda x: x.strip(":").split(':'))
 
 		for gmp in searchpath:
 			path = os.path.join(gmp, *parts)
@@ -121,21 +135,21 @@ class Item:
 	_gazeboMaterialFiles = {}
 	def _getGazeboMaterial(self, node):
 		name, gzMaterial = None, None
-		
+
 		for opt in node._children:
-			if opt.nodeName() == 'name':
+			if opt.nodeName == 'name':
 				name = opt.text()
 				if not name.startswith('Gazebo/'):
 					raise Exception("Unsupported color NS: {0}".format(name))
-			elif opt.nodeName() == 'uri':
+			elif opt.nodeName == 'uri':
 				materialpath = self.uriToPath(opt.text())
 				if materialpath is None:
-					raise Exception("Cannot find material reference in GAZEBO_MODELS_PATH and GAZEBO_RESOURCE_PATH: {0}".format(opt.text()))
+					raise Exception(f"Cannot find material reference in GAZEBO_MODELS_PATH and GAZEBO_RESOURCE_PATH: {opt.text()}")
 				if self.__class__._gazeboMaterialFiles.get(materialpath) is None:
 					self.__class__._gazeboMaterialFiles[materialpath] = GazeboMaterialFile(materialpath)
 				gzMaterial = self.__class__._gazeboMaterialFiles[materialpath]
 			else:
-				raise Exception("Unknown material/script tag: {0}".format(opt.nodeName()))
+				raise Exception("Unknown material/script tag: {0}".format(opt.nodeName))
 		return name, gzMaterial
 
 	def getRootNode(self):
@@ -178,7 +192,7 @@ class Item:
 						self.removeChild(ch)
 					for ch in self._node.childNodes:
 						self._node.removeChild(ch)
-					
+
 					for name, attr in copy._node.childNodes[0].attributes.items():
 						node._node.setAttribute(name, attr)
 
@@ -190,44 +204,44 @@ class Item:
 					self.appendChild(node)
 					break
 				else:
-					raise Exception("Unsupported file type: {0}".format(c.nodeName()))
+					raise Exception("Unsupported file type: {0}".format(c.nodeName))
 
 		_properties = {}
 		for c in self._children[:]:
-			if c.nodeName() not in _properties:
-				_properties[c.nodeName()] = c
-			elif type(_properties[c.nodeName()]) == list:
-				_properties[c.nodeName()].append(c)
+			if c.nodeName not in _properties:
+				_properties[c.nodeName] = c
+			elif type(_properties[c.nodeName]) == list:
+				_properties[c.nodeName].append(c)
 			else:
-				_properties[c.nodeName()] = [_properties[c.nodeName()], c]
+				_properties[c.nodeName] = [_properties[c.nodeName], c]
 
 		for c in self._children[:]:
 
 			# Unused elements
-			if c.nodeName() in ['plugin', 'physics', 'gravity', 'velocity_decay', 'self_collide', 'surface', 'static', 'dissipation', 'stiffness', 'sensor', '#comment']:
+			if c.nodeName in ['plugin', 'physics', 'gravity', 'velocity_decay', 'self_collide', 'surface', 'static', 'dissipation', 'stiffness', 'sensor', '#comment']:
 				self.removeChild(c)
 
 			# Inner tags into attributes, nothing else
-			elif c.nodeName() in ['inertia', 'cylinder', 'sphere', 'box', 'limit', 'dynamics'] :
-				if c.nodeName() == 'limit':
+			elif c.nodeName in ['inertia', 'cylinder', 'sphere', 'box', 'limit', 'dynamics'] :
+				if c.nodeName == 'limit':
 					c.convert()
 				for mc in c._children[:]:
-					c.setAttribute(mc.nodeName(), mc.text().strip())
+					c.setAttribute(mc.nodeName, mc.text().strip())
 					c.removeChild(mc)
 
-			elif c.nodeName() in ['visual', 'collision']:
-				if c.nodeName() == 'collision' and c.nodeName() in _properties:
+			elif c.nodeName in ['visual', 'collision']:
+				if c.nodeName == 'collision' and c.nodeName in _properties:
 					self.removeChild(c)
 				else:
 					for name,attr in c._node.attributes.items():
 						c.removeAttribute(name)
 
-			elif c.nodeName() == 'material':
+			elif c.nodeName == 'material':
 				"""
 					<material>
 					  <script>
-					    <name>Gazebo/DarkGrey</name>
-					    <uri>file://media/materials/scripts/gazebo.material</uri>
+						<name>Gazebo/DarkGrey</name>
+						<uri>file://media/materials/scripts/gazebo.material</uri>
 					  </script>
 					</material>
 				---
@@ -235,31 +249,40 @@ class Item:
 					  <color rgba="0.3 0.3 0.3 1.0"/>
 					</material>	
 				"""
-				if len(c._children) == 1 and c._children[0].nodeName() == 'script' and c._level>1: 
-					name, gzMaterial = self._getGazeboMaterial(c._children[0])
-					c.removeChild(c._children[0])
-					if name:
-						c.setAttribute("name", name)
+				unsupported = []
+				for child in c._children:
+					if child.nodeName == 'script' and c._level>1: 
+						name, gzMaterial = self._getGazeboMaterial(child)
+						c.removeChild(c._children[0])
+						if name:
+							c.setAttribute("name", name)
 
-					materials = gzMaterial.getColor(name)
-					material, exists = self._getMaterialNode(name)
-					if materials:
-						if not exists:
-							color = Item(self.createElement('color'), parent=c, document=self._document, level=c._level+1, root=self.getRootNode())
-							rgba = materials[0].args() + ['1.0', '1.0', '1.0', '1.0']
-							color.setAttribute("rgba", " ".join(rgba[:4])) # rgba should contains 4 element, some of gazebo's material could contains 3 elements
-							material.appendChild(color)
+						materials = gzMaterial.getColor(name)
+						material, exists = self._getMaterialNode(name)
+						if materials:
+							if not exists:
+								color = Item(self.createElement('color'), parent=c, document=self._document, level=c._level+1, root=self.getRootNode())
+								rgba = materials[0].args + ['1.0', '1.0', '1.0', '1.0']
+								color.setAttribute("rgba", " ".join(rgba[:4])) # rgba should contains 4 element, some of gazebo's material could contains 3 elements
+								material.appendChild(color)
+						else:
+							query, fn = f'material[name={name}].technique.pass.ambient', gzMaterial.getFilename()
+							raise Exception(f"Material not found ({query}) at {fn}")
 					else:
-						raise Exception("Material not found ({1}) at {2}".format('material[name='+name+'].technique.pass.ambient', gzMaterial.getFilename()))
-				else:
-					raise Exception("Unsupported material subtag: {0}".format(c._children[0].nodeName() if len(c._children) else "<None>"))
-			elif c.nodeName() == 'pose':
+						unsupported.append(child)
+
+				if not c._children:
+					sys.stderr.write(f"WARN: empty material: {c}\n")
+				if unsupported:
+					sys.stderr.write(f"WARN: Unsupported one of material subtag: {unsupported}\n")
+					#raise Exception()
+			elif c.nodeName == 'pose':
 				"""
-        				<pose frame=''>0 0 0 0 0 -1.0471975512</pose>
+					<pose frame=''>0 0 0 0 0 -1.0471975512</pose>
 				---
 					<origin rpy="0 0 -1.0471975512" xyz="0 0 0"/>
 				"""
-				if self.nodeName() == 'robot':
+				if self.nodeName == 'robot':
 					self.removeChild(c)
 				else:
 					# Pose replaced with Origin
@@ -269,7 +292,7 @@ class Item:
 					origin.setAttribute("rpy", " ".join(text[3:]))
 					self.replaceChild(origin, c)
 
-			elif c.nodeName() in ['parent', 'child', 'mass']:
+			elif c.nodeName in ['parent', 'child', 'mass']:
 				"""
 					<nodeName>@text</nodeName>
 				---
@@ -277,7 +300,7 @@ class Item:
 				"""
 				attr = dict(zip(
 					('parent', 'child', 'mass'),
-					('link',   'link',  'value'))).get(c.nodeName())
+					('link',   'link',  'value'))).get(c.nodeName)
 				if len(c._node.childNodes):
 					c.setAttribute(attr, c.text().strip())
 					cnodes = c._node.childNodes[:]
@@ -286,30 +309,30 @@ class Item:
 				for mc in c._children:
 					c.removeChild(mc)
 
-			elif c.nodeName() == 'mesh':
+			elif c.nodeName == 'mesh':
 				mesh = c._node
 				for mc in c._children[:]:
-					if mc.nodeName() == "scale":
+					if mc.nodeName == "scale":
 						mesh.setAttribute("scale", mc.text())
-					elif mc.nodeName() == "uri":
+					elif mc.nodeName == "uri":
 						model = mc.text().strip()
 						mesh.setAttribute("filename", "file://"+self.uriToPath(model))
 					else:
-						sys.stderr.write("Ignored tagname {0} at level {1}: {2}".format(c.nodeName(), self._level, mc.nodeName()))
+						sys.stderr.write("Ignored tagname {0} at level {1}: {2}".format(c.nodeName, self._level, mc.nodeName))
 					c.removeChild(mc)
 
-			elif c.nodeName() == 'axis':
+			elif c.nodeName == 'axis':
 				"""
 					<axis>
 					  <xyz>0 -1 0</xyz>
 					  <limit>
-					    <lower>0</lower>
-					    <upper>0</upper>
-					    <effort>100</effort>
-					    <velocity>-1</velocity>
+						<lower>0</lower>
+						<upper>0</upper>
+						<effort>100</effort>
+						<velocity>-1</velocity>
 					  </limit>
 					  <dynamics>
-					    <damping>0.1</damping>
+						<damping>0.1</damping>
 					  </dynamics>
 					  <use_parent_model_frame>1</use_parent_model_frame>
 					</axis>
@@ -319,12 +342,12 @@ class Item:
 				"""
 				c.convert()
 				for mc in c._children[:]:
-					if mc.nodeName() == 'xyz':
-						c.setAttribute(mc.nodeName(), mc._node.childNodes[0].toxml().strip())
+					if mc.nodeName == 'xyz':
+						c.setAttribute(mc.nodeName, mc._node.childNodes[0].toxml().strip())
 					c.removeChild(mc)
-					if mc.nodeName() == 'limit':
+					if mc.nodeName == 'limit':
 						self.appendChild(mc)
-					if mc.nodeName() == 'dynamics':
+					if mc.nodeName == 'dynamics':
 						if mc.getAttribute('damping') or mc.getAttribute('friction'):
 							self.appendChild(mc)
 						else:
@@ -345,7 +368,7 @@ class Item:
 			if c._node.parentNode != self._node:
 				self._node.appendChild(c._node)
 				c._parent = self
-			if c.nodeName() == 'limit':
+			if c.nodeName == 'limit':
 				c.convert()
 			c.convert()
 
@@ -353,12 +376,14 @@ class Item:
 		return self._node.toprettyxml(indent="  ")
 
 	def dumptree(self):
-		sys.stderr.write("{0}{1}: {2}({3})\n".format("  "*self._level, self._level, self.nodeName(), len(self._children)))
+		sys.stderr.write("{0}{1}: {2}({3})\n".format("  "*self._level, self._level, self.nodeName, len(self._children)))
 		for c in self._children:
 			c.dumptree()
 
 
 def main():
+	load_gazebo_setup()
+
 	if len(sys.argv) == 1 or len(sys.argv) > 3 or 'help' in sys.argv or '--help' in sys.argv or '-h' in sys.argv:
 		sys.stdout.write("""usage: {0} <input.sdf> [<output.urdf>]\n\n  By default content is printed to stdout.\n\n""".format(sys.argv[0]))
 		exit(1)
@@ -376,3 +401,5 @@ def main():
 
 if __name__ == '__main__':
 	main()
+
+# vim: ts=4 sw=4 noet

@@ -12,12 +12,15 @@ class GazeboMaterialItem(object):
 		self._inherits_link = []
 		self._inheritance = []
 
+	@property
 	def level(self):
 		return self._level
 
+	@property
 	def type(self):
 		return self._type
 
+	@property
 	def parent(self):
 		return self._parent
 
@@ -25,9 +28,11 @@ class GazeboMaterialItem(object):
 		if idx < len(self._arguments):
 			return self._arguments[idx]
 
+	@property
 	def args(self):
 		return self._arguments
 
+	@property
 	def name(self):
 		return self._name
 
@@ -44,7 +49,7 @@ class GazeboMaterialItem(object):
 	def _addChild(self, item):
 		self._children.append(item)
 		self.__fixChildLevels(item)
-		
+
 	def addChild(self, item):
 		#if item not in self._children:
 		item._parent = self
@@ -83,9 +88,12 @@ class GazeboMaterialItem(object):
 			return True
 		out = []
 		for child in self._children[:]:
-			if child.type() == typeName and checkOpts(child):
+			if child.type == typeName and checkOpts(child):
 				out.append(child)
 		return out
+
+	def __repr__(self):
+		return 'GazeboMaterialItem<' + str(self) + '>'
 
 	def __str__(self):
 		srep = ""
@@ -118,14 +126,14 @@ class GazeboMaterialItem(object):
 			fwrite = sys.stdout
 			if filename is not None:
 				fwrite = open(fp, "w")
-			
+
 
 		lvl = self._level+1
 		namedef = '@root' if lvl == 0 else ("<"+self._type+"[{0}]>".format(len(self._arguments)))
 		name = self._name if self._name is not None else namedef
-		
+
 		fwrite.write("{2}{0}: {1} +({3})\n".format(lvl, name, "  "*(lvl), len(self._children)))
 		for child in self._children:
 			child.dumptree(fwrite=fwrite)
 
-
+# vim: ts=4 sw=4 noet
