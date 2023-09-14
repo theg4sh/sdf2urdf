@@ -4,7 +4,7 @@ Converter gazebo's sdf to urdf.
 
 ## Dependencies
 ```(sh)
-sudo pip3 install xacro
+sudo pip3 install xacro python-dotenv pyparsing
 ```
 
 ## Usage
