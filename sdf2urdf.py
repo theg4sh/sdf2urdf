@@ -223,6 +223,7 @@ class Item:
 
 			# Inner tags into attributes, nothing else
 			elif c.nodeName in ['inertia', 'cylinder', 'sphere', 'box', 'limit', 'dynamics'] :
+
 				if c.nodeName == 'limit':
 					c.convert()
 				for mc in c._children[:]:
@@ -287,7 +288,10 @@ class Item:
 				else:
 					# Pose replaced with Origin
 					origin = Item(self.createElement("origin"), parent=self, document=self._document, level=self._level+1, root=self.getRootNode())
-					text = c.text().strip().split(' ')
+					try:
+						text = c.text().strip().split(' ')
+					except:
+						text = ['0', '0', '0', '0', '0', '0']
 					origin.setAttribute("xyz", " ".join(text[:3]))
 					origin.setAttribute("rpy", " ".join(text[3:]))
 					self.replaceChild(origin, c)
