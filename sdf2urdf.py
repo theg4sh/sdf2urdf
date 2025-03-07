@@ -3,6 +3,9 @@
 import os
 import sys
 
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
 # GazeboMaterial
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from GazeboMaterial import *
@@ -11,6 +14,9 @@ from GazeboMaterial import *
 from xacro import parse
 from xacro.xmlutils import *
 
+
+sdf_frames = {}
+link_attach_joint = {}
 
 rospack = None
 
@@ -73,7 +79,7 @@ class Item:
 	def removeChild(self, item):
 		pn = item._node.parentNode
 		node = item._node
-		while pn is not None and pn != self._node.parentNode:
+		while pn is not None and pn != self._node.parentNode:#不知道这个循环的意义在哪里，其实就是让父节点删掉这个节点
 			pn.removeChild(node)
 			node, pn = pn, pn.parentNode
 
@@ -186,6 +192,7 @@ class Item:
 							<...>
 						</robot>
 					"""
+					self.frame = np.eye(4)
 					node = Item(self.createElement('robot'), parent=self, document=self._document, level=self._level+1) # Root is None because it's a new root node
 					copy = c.cloneNode()
 					for ch in self._children:
@@ -212,8 +219,69 @@ class Item:
 				_properties[c.nodeName] = c
 			elif type(_properties[c.nodeName]) == list:
 				_properties[c.nodeName].append(c)
-			else:
+			else:#if there has existed a node with the same name, then convert it to a list
 				_properties[c.nodeName] = [_properties[c.nodeName], c]
+		global sdf_frames
+
+		if self.nodeName in ['link','joint']:# if the node is link, then get the pose of the link
+			link_name = self._node.getAttribute('name')
+			if link_name not in sdf_frames: #the base link frame is Identity matrix
+				sdf_frames[link_name] = np.eye(4)
+
+			if 'pose' in _properties:
+				#get joint frame
+				relative_to_frame = np.eye(4)
+				relative_to_frame_name = _properties['pose']._node.getAttribute('relative_to')
+				if relative_to_frame_name == '':
+					print(f"{link_name} do not have relative_to attribute")
+				else:
+					relative_to_frame = sdf_frames[relative_to_frame_name]
+				#get relative pose to joint frame
+				text = _properties['pose'].text().strip().split(' ')  # ['0', '0', '0', '0', '0', '0']
+				Rotation_Matrix = R.from_euler('xyz', [float(x) for x in text[3:]]).as_matrix()
+				Translation_Matrix = np.eye(4)
+				Translation_Matrix[:3, :3] = Rotation_Matrix
+				Translation_Matrix[:3, 3] = [float(x) for x in text[:3]]
+				link_pose = relative_to_frame @ Translation_Matrix
+				sdf_frames[link_name] = link_pose
+				xyz = link_pose[:3,3]
+				rpy = R.from_matrix(link_pose[:3,:3]).as_euler('xyz')
+				_properties['pose']._node.childNodes[0].replaceWholeText(f"{xyz[0]} {xyz[1]} {xyz[2]} {rpy[0]} {rpy[1]} {rpy[2]}")
+
+		global link_attach_joint
+		if self.nodeName == 'joint':
+			link_attach_joint[_properties['child'].text()] = self._node.getAttribute('name')
+			base_frame = sdf_frames[_properties['parent'].text()]
+			self_frame = sdf_frames[self._node.getAttribute('name')]
+			relative_to_frame = np.linalg.inv(base_frame) @ self_frame
+			xyz = relative_to_frame[:3, 3]
+			rpy = R.from_matrix(relative_to_frame[:3, :3]).as_euler('xyz')
+			_properties['pose']._node.childNodes[0].replaceWholeText(
+				f"{xyz[0]} {xyz[1]} {xyz[2]} {rpy[0]} {rpy[1]} {rpy[2]}")
+
+		if self.nodeName == 'link':
+			# if the node is link, then get the pose of the link and its attach joint
+			link_name = self._node.getAttribute('name')
+			if link_name in link_attach_joint:
+				link_frame = sdf_frames[link_name]
+				joint_frame = sdf_frames[link_attach_joint[link_name]]
+				link_relative_to_joint = np.linalg.inv(joint_frame) @ link_frame
+
+				for c in self._children[:]:
+					if c.nodeName in ['visual', 'collision', 'inertia']:
+						for d in c._children[:]:
+							if d.nodeName == 'pose':
+								# compute Pose relatie to the joint frame
+								text = d.text().strip().split(' ')  # ['0', '0', '0', '0', '0', '0']
+								Rotation_Matrix = R.from_euler('xyz', [float(x) for x in text[3:]]).as_matrix()
+								Translation_Matrix = np.eye(4)
+								Translation_Matrix[:3, :3] = Rotation_Matrix
+								Translation_Matrix[:3, 3] = [float(x) for x in text[:3]]
+								pose_relative_to_joint = link_relative_to_joint @ Translation_Matrix
+								xyz = pose_relative_to_joint[:3, 3]
+								rpy = R.from_matrix(pose_relative_to_joint[:3, :3]).as_euler('xyz')
+								d._node.childNodes[0].replaceWholeText(f"{xyz[0]} {xyz[1]} {xyz[2]} {rpy[0]} {rpy[1]} {rpy[2]}")
+			self.removeChild(_properties['pose'])
 
 		for c in self._children[:]:
 
@@ -230,12 +298,12 @@ class Item:
 					c.setAttribute(mc.nodeName, mc.text().strip())
 					c.removeChild(mc)
 
-			elif c.nodeName in ['visual', 'collision']:
-				if c.nodeName == 'collision' and c.nodeName in _properties:
-					self.removeChild(c)
-				else:
-					for name,attr in c._node.attributes.items():
-						c.removeAttribute(name)
+			# elif c.nodeName in ['visual', 'collision']:
+			# 	if c.nodeName == 'collision' and c.nodeName in _properties:
+			# 		self.removeChild(c)
+			# 	else:
+			# 		for name,attr in c._node.attributes.items():
+			# 			c.removeAttribute(name)
 
 			elif c.nodeName == 'material':
 				"""
@@ -252,7 +320,7 @@ class Item:
 				"""
 				unsupported = []
 				for child in c._children:
-					if child.nodeName == 'script' and c._level>1: 
+					if child.nodeName == 'script' and c._level>1:
 						name, gzMaterial = self._getGazeboMaterial(child)
 						c.removeChild(c._children[0])
 						if name:
@@ -276,7 +344,7 @@ class Item:
 					sys.stderr.write(f"WARN: empty material: {c}\n")
 				if unsupported:
 					sys.stderr.write(f"WARN: Unsupported one of material subtag: {unsupported}\n")
-					#raise Exception()
+					self.removeChild(c)
 			elif c.nodeName == 'pose':
 				"""
 					<pose frame=''>0 0 0 0 0 -1.0471975512</pose>
@@ -320,7 +388,7 @@ class Item:
 						mesh.setAttribute("scale", mc.text())
 					elif mc.nodeName == "uri":
 						model = mc.text().strip()
-						mesh.setAttribute("filename", "file://"+self.uriToPath(model))
+						mesh.setAttribute("filename", model)
 					else:
 						sys.stderr.write("Ignored tagname {0} at level {1}: {2}".format(c.nodeName, self._level, mc.nodeName))
 					c.removeChild(mc)
@@ -387,7 +455,6 @@ class Item:
 
 def main():
 	load_gazebo_setup()
-
 	if len(sys.argv) == 1 or len(sys.argv) > 3 or 'help' in sys.argv or '--help' in sys.argv or '-h' in sys.argv:
 		sys.stdout.write("""usage: {0} <input.sdf> [<output.urdf>]\n\n  By default content is printed to stdout.\n\n""".format(sys.argv[0]))
 		exit(1)
